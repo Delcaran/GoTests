@@ -25,6 +25,13 @@ type grid struct {
 	population          [][]cell
 }
 
+var population float32
+var size int
+var ew bool
+var ns bool
+var g grid
+var running bool
+
 // Initialize the grid
 func (g *grid) initialize(population float32, size int, ew bool, ns bool) {
 	g.size = size
@@ -61,7 +68,7 @@ func (g grid) print(app *tview.Application, visualization *tview.TextView) {
 		buffer.WriteString("\n")
 	}
 	visualization.SetText(buffer.String())
-	app.ForceDraw()
+	app.Draw()
 }
 
 func (g grid) getCell(x int, y int) *cell {
@@ -201,7 +208,7 @@ func isNumeric(v string, r rune) bool {
 
 func run(app *tview.Application, visualization *tview.TextView, status *tview.TextView, population float32, size int, ew bool, ns bool) {
 	generation := 0
-	for run := true; run; {
+	for running = true; running; {
 		output := ""
 		oldGrid := g.copy()
 		g.evolve()
@@ -213,25 +220,21 @@ func run(app *tview.Application, visualization *tview.TextView, status *tview.Te
 		if oldGrid.equal(g) {
 			output = fmt.Sprintf("Generation %d\n\nGAME OVER", generation)
 			status.SetText(output)
-			app.ForceDraw()
-			run = false
+			app.Draw()
+			running = false
 			continue
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(30 * time.Millisecond)
 	}
 }
 
 func ready(app *tview.Application, visualization *tview.TextView, g *grid, population float32, size int, ew bool, ns bool) {
-	rand.Seed(time.Now().UnixNano())
-	g.initialize(population/100, size, ew, ns)
-	g.print(app, visualization)
+	if running == false {
+		rand.Seed(time.Now().UnixNano())
+		g.initialize(population/100, size, ew, ns)
+		g.print(app, visualization)
+	}
 }
-
-var population float32
-var size int
-var ew bool
-var ns bool
-var g grid
 
 func setPopulation(v string) {
 	if intpop, err := strconv.Atoi(v); err == nil {
@@ -259,6 +262,7 @@ func main() {
 	setPopulation("30")
 	setEW(false)
 	setNS(false)
+	running = false
 
 	visualization := tview.NewTextView().
 		SetDynamicColors(true).
@@ -266,12 +270,12 @@ func main() {
 		SetTextAlign(tview.AlignCenter).
 		SetChangedFunc(func() {
 			app.Draw()
-
 		})
 	visualization.SetBorder(true).SetTitle("WORLD").SetTitleAlign(tview.AlignCenter)
 	ready(app, visualization, &g, population, size, ew, ns)
 
 	status := tview.NewTextView().
+		SetText("READY").
 		SetDynamicColors(true).
 		SetWordWrap(false).
 		SetChangedFunc(func() {
@@ -283,26 +287,42 @@ func main() {
 		AddInputField("Size", "20", 0, isNumeric, func(v string) {
 			setSize(v)
 			ready(app, visualization, &g, population, size, ew, ns)
+			status.SetText("READY")
 		}).
 		AddInputField("% populated", "30", 0, isNumeric, func(v string) {
 			setPopulation(v)
 			ready(app, visualization, &g, population, size, ew, ns)
+			status.SetText("READY")
 		}).
 		AddCheckbox("Connected East-West", false, func(v bool) {
 			setEW(v)
 			ready(app, visualization, &g, population, size, ew, ns)
+			status.SetText("READY")
 		}).
 		AddCheckbox("Connected North-South", false, func(v bool) {
 			setNS(v)
 			ready(app, visualization, &g, population, size, ew, ns)
+			status.SetText("READY")
 		}).
-		AddButton("Reseed", func() { ready(app, visualization, &g, population, size, ew, ns) }).
-		AddButton("Start", func() { run(app, visualization, status, population, size, ew, ns) }).
+		AddButton("Reseed", func() {
+			ready(app, visualization, &g, population, size, ew, ns)
+			status.SetText("READY")
+		}).
+		AddButton("Start", func() {
+			if running == false {
+				go run(app, visualization, status, population, size, ew, ns)
+			}
+		}).
+		AddButton("Stop", func() {
+			if running {
+				running = false
+			}
+		}).
 		AddButton("Quit", func() { app.Stop() })
 	configuration.SetBorder(true).SetTitle("Configuration").SetTitleAlign(tview.AlignCenter)
 
 	flex := tview.NewFlex().
-		AddItem(configuration, 0, 1, true).
+		AddItem(configuration, 0, 2, true).
 		AddItem(visualization, 0, 5, true).
 		AddItem(status, 0, 1, true)
 
