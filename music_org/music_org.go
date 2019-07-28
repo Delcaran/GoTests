@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path"
@@ -11,40 +12,59 @@ import (
 	"github.com/dhowden/tag"
 )
 
-// StopProcessing error to stop processing too many files in hierarchy
-type StopProcessing struct {
+type stopProcessing struct {
 	s string
 }
 
-// TrackInfo contains all necessary info about a music track for processing
-type TrackInfo struct {
-	src                 string
-	dst                 string
-	Genre               string
-	Composer            string
-	Title               string
-	Artist              string
-	Album               string
-	AlbumArtist         string
-	DiscNum             int
-	DiscTot             int
-	Rating              int64
-	TrackNum            int
-	TrackTot            int
-	Compilation         string
-	AcoustidFingerprint string // acoustid_id, acoustid_fingerprint
-	Performer           string
-	IsClassical         bool
+type classicalTrackInfo struct {
+	composer     string
+	movementNum  string // movement_num
+	movementName string // movement_name | movement name
+	conductor    string
 }
 
-func (e *StopProcessing) Error() string {
+type trackInfo struct {
+	classicalInfo       classicalTrackInfo
+	src                 string
+	dst                 string
+	genre               string
+	title               string
+	artist              string
+	album               string
+	albumArtist         string
+	discNum             int
+	discTot             int
+	rating              int64
+	trackNum            int
+	trackTot            int
+	compilation         string
+	acoustidFingerprint string // acoustid_id, acoustid_fingerprint
+	performer           string
+	isClassical         bool
+}
+
+func (e *stopProcessing) Error() string {
 	return e.s
+}
+
+func cleanString(stringa string) string {
+	newstring := strings.TrimSpace(stringa)
+	newstring = strings.ReplaceAll(stringa, "/", "")
+	doublespace := (strings.Index(newstring, "  ") != -1)
+	for doublespace {
+		newstring = strings.ReplaceAll(newstring, "  ", " ")
+		doublespace = (strings.Index(newstring, "  ") != -1)
+	}
+	maxNameLength := 240
+	if len(newstring) > maxNameLength {
+		newstring = newstring[:maxNameLength]
+	}
+	return newstring
 }
 
 func main() {
 	// ottengo tutti i file e le cartelle
-	var parsingFiles []TrackInfo
-	//var baseDstPath = path.Join("Z:", "hdd2", "Music")
+	var parsingFiles []trackInfo
 	var srcPath = path.Join("Z:", "hdd2", "_Music")
 	filepath.Walk(srcPath,
 		func(path string, info os.FileInfo, err error) error {
@@ -61,42 +81,51 @@ func main() {
 					if errtag != nil {
 						log.Fatal(errtag)
 					} else {
-						var trackInfo TrackInfo
+						var trackInfo trackInfo
 						trackInfo.src = path
-						trackInfo.Genre = m.Genre()
-						trackInfo.Title = m.Title()
-						trackInfo.Artist = m.Artist()
-						trackInfo.Album = m.Album()
-						trackInfo.TrackNum, trackInfo.TrackTot = m.Track()
-						trackInfo.AlbumArtist = m.AlbumArtist()
-						trackInfo.DiscNum, trackInfo.DiscTot = m.Disc()
+						trackInfo.genre = m.Genre()
+						trackInfo.title = m.Title()
+						trackInfo.artist = m.Artist()
+						trackInfo.album = m.Album()
+						trackInfo.trackNum, trackInfo.trackTot = m.Track()
+						trackInfo.albumArtist = m.AlbumArtist()
+						trackInfo.discNum, trackInfo.discTot = m.Disc()
 						tags := m.Raw()
 						for name, value := range tags {
 							name = strings.ToLower(name)
 							if name == "rating" {
-								trackInfo.Rating, _ = strconv.ParseInt(value.(string), 10, 0)
+								trackInfo.rating, _ = strconv.ParseInt(value.(string), 10, 0)
 							}
 							if name == "compilation" {
-								trackInfo.Compilation = value.(string)
+								trackInfo.compilation = value.(string)
 							}
 							if name == "performer" {
-								trackInfo.Performer = value.(string)
+								trackInfo.performer = value.(string)
 							}
 							if name == "acoustid_fingerprint" {
-								trackInfo.AcoustidFingerprint = value.(string)
+								trackInfo.acoustidFingerprint = value.(string)
 							}
 							if name == "is_classical" {
-								trackInfo.IsClassical = (value == "1")
+								trackInfo.isClassical = (value == "1")
 							}
 							if name == "composer" {
-								trackInfo.Composer = value.(string)
+								trackInfo.classicalInfo.composer = value.(string)
+							}
+							if name == "movement_num" {
+								trackInfo.classicalInfo.movementNum = value.(string)
+							}
+							if name == "movement_name" {
+								trackInfo.classicalInfo.movementName = value.(string)
+							}
+							if name == "conductor" {
+								trackInfo.classicalInfo.conductor = value.(string)
 							}
 						}
-						if !trackInfo.IsClassical {
+						if !trackInfo.isClassical {
 							classicalString := []string{"concert", "ballet", "classical", "symphon"}
 							for _, substring := range classicalString {
-								if strings.Index(strings.ToLower(trackInfo.Genre), substring) > 0 {
-									trackInfo.IsClassical = true
+								if strings.Index(strings.ToLower(trackInfo.genre), substring) > 0 {
+									trackInfo.isClassical = true
 								}
 							}
 						}
@@ -105,41 +134,57 @@ func main() {
 				}
 			}
 			if len(parsingFiles) == 1000 {
-				return &StopProcessing{"basta"}
+				return &stopProcessing{"Cominciamo a lavorare"}
 			}
 			return nil
 		})
 	// got 1000 files, start processing
-	/*
-		for _, track := range parsingFiles {
-			var destDir string
-			var destFile string
-			if track.IsClassical {
-				log.Println("Classica")
-			} else {
-				destDir = path.Join(baseDstPath, track.AlbumArtist, track.Album)
+	var baseDstPath = path.Join("Z:", "hdd2", "Music")
+	for _, track := range parsingFiles {
+		var destDir string
+		var destFile string
+		if track.isClassical {
+			destDir = baseDstPath
+			if len(track.classicalInfo.composer) > 0 {
+				destDir = path.Join(destDir, cleanString(track.classicalInfo.composer))
 			}
-			os.MkdirAll(destDir, os.FileMode(0777))
-			if track.DiscNum > 0 {
-				destFile = fmt.Sprintf("%d.", track.DiscNum)
+			if len(track.album) > 0 {
+				destDir = path.Join(destDir, cleanString(track.album))
 			}
-			if track.TrackNum > 0 {
-				destFile += fmt.Sprintf("%d", track.TrackNum)
+			if len(track.classicalInfo.conductor) > 0 {
+				destDir = path.Join(destDir, cleanString(track.classicalInfo.conductor))
+			}
+			if len(track.albumArtist) > 0 {
+				destDir = path.Join(destDir, cleanString(track.albumArtist))
+			}
+			if len(track.title) > 0 {
+				destFile = cleanString(track.title)
+			}
+		} else {
+			destDir = path.Join(baseDstPath, cleanString(track.albumArtist), cleanString(track.album))
+			if track.discNum > 0 {
+				destFile = fmt.Sprintf("%d.", track.discNum)
+			}
+			if track.trackNum > 0 {
+				destFile += fmt.Sprintf("%d", track.trackNum)
 				if len(destFile) > 0 {
 					destFile += "_"
 				}
 			}
-			if len(track.Artist) > 0 && track.Artist != track.AlbumArtist {
-				destFile += track.Artist
+			if len(track.artist) > 0 && track.artist != track.albumArtist {
+				destFile += cleanString(track.artist)
 				if len(destFile) > 0 {
 					destFile += "_"
 				}
 			}
-			if len(track.Title) > 0 {
-				destFile += track.Title
+			if len(track.title) > 0 {
+				destFile += cleanString(track.title)
 			}
-			destFile += filepath.Ext(track.src)
-			log.Println(path.Join(destDir, destFile))
 		}
-	*/
+		destFile += filepath.Ext(track.src)
+		destPath := path.Join(destDir, destFile)
+		log.Printf("%s => %s \n", track.src, destPath)
+		os.MkdirAll(destDir, os.FileMode(0777))
+		os.Rename(track.src, destPath)
+	}
 }
