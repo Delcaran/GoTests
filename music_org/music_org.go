@@ -64,15 +64,14 @@ func cleanString(stringa string) string {
 
 func main() {
 	// ottengo tutti i file e le cartelle
-	var parsingFiles []trackInfo
 	var srcPath = path.Join("Z:", "hdd2", "_Music")
 	filepath.Walk(srcPath,
-		func(path string, info os.FileInfo, err error) error {
+		func(filepath string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			if !info.IsDir() {
-				f, err := os.Open(path)
+				f, err := os.Open(filepath)
 				if err != nil {
 					log.Fatal(err)
 				} else {
@@ -82,7 +81,7 @@ func main() {
 						log.Fatal(errtag)
 					} else {
 						var trackInfo trackInfo
-						trackInfo.src = path
+						trackInfo.src = filepath
 						trackInfo.genre = m.Genre()
 						trackInfo.title = m.Title()
 						trackInfo.artist = m.Artist()
@@ -129,62 +128,56 @@ func main() {
 								}
 							}
 						}
-						parsingFiles = append(parsingFiles, trackInfo)
+						// doing
+						var baseDstPath = path.Join("Z:", "hdd2", "Music")
+						var destDir string
+						var destFile string
+						if trackInfo.isClassical {
+							destDir = baseDstPath
+							if len(trackInfo.classicalInfo.composer) > 0 {
+								destDir = path.Join(destDir, cleanString(trackInfo.classicalInfo.composer))
+							}
+							if len(trackInfo.album) > 0 {
+								destDir = path.Join(destDir, cleanString(trackInfo.album))
+							}
+							if len(trackInfo.classicalInfo.conductor) > 0 {
+								destDir = path.Join(destDir, cleanString(trackInfo.classicalInfo.conductor))
+							}
+							if len(trackInfo.albumArtist) > 0 {
+								destDir = path.Join(destDir, cleanString(trackInfo.albumArtist))
+							}
+							if len(trackInfo.title) > 0 {
+								destFile = cleanString(trackInfo.title)
+							}
+						} else {
+							destDir = path.Join(baseDstPath, cleanString(trackInfo.albumArtist), cleanString(trackInfo.album))
+							if trackInfo.discNum > 0 {
+								destFile = fmt.Sprintf("%d.", trackInfo.discNum)
+							}
+							if trackInfo.trackNum > 0 {
+								destFile += fmt.Sprintf("%d", trackInfo.trackNum)
+								if len(destFile) > 0 {
+									destFile += "_"
+								}
+							}
+							if len(trackInfo.artist) > 0 && trackInfo.artist != trackInfo.albumArtist {
+								destFile += cleanString(trackInfo.artist)
+								if len(destFile) > 0 {
+									destFile += "_"
+								}
+							}
+							if len(trackInfo.title) > 0 {
+								destFile += cleanString(trackInfo.title)
+							}
+						}
+						destFile += path.Ext(trackInfo.src)
+						destPath := path.Join(destDir, destFile)
+						log.Printf("%s => %s \n", trackInfo.src, destPath)
+						os.MkdirAll(destDir, os.FileMode(0777))
+						os.Rename(trackInfo.src, destPath)
 					}
 				}
 			}
-			if len(parsingFiles) == 1000 {
-				return &stopProcessing{"Cominciamo a lavorare"}
-			}
 			return nil
 		})
-	// got 1000 files, start processing
-	var baseDstPath = path.Join("Z:", "hdd2", "Music")
-	for _, track := range parsingFiles {
-		var destDir string
-		var destFile string
-		if track.isClassical {
-			destDir = baseDstPath
-			if len(track.classicalInfo.composer) > 0 {
-				destDir = path.Join(destDir, cleanString(track.classicalInfo.composer))
-			}
-			if len(track.album) > 0 {
-				destDir = path.Join(destDir, cleanString(track.album))
-			}
-			if len(track.classicalInfo.conductor) > 0 {
-				destDir = path.Join(destDir, cleanString(track.classicalInfo.conductor))
-			}
-			if len(track.albumArtist) > 0 {
-				destDir = path.Join(destDir, cleanString(track.albumArtist))
-			}
-			if len(track.title) > 0 {
-				destFile = cleanString(track.title)
-			}
-		} else {
-			destDir = path.Join(baseDstPath, cleanString(track.albumArtist), cleanString(track.album))
-			if track.discNum > 0 {
-				destFile = fmt.Sprintf("%d.", track.discNum)
-			}
-			if track.trackNum > 0 {
-				destFile += fmt.Sprintf("%d", track.trackNum)
-				if len(destFile) > 0 {
-					destFile += "_"
-				}
-			}
-			if len(track.artist) > 0 && track.artist != track.albumArtist {
-				destFile += cleanString(track.artist)
-				if len(destFile) > 0 {
-					destFile += "_"
-				}
-			}
-			if len(track.title) > 0 {
-				destFile += cleanString(track.title)
-			}
-		}
-		destFile += filepath.Ext(track.src)
-		destPath := path.Join(destDir, destFile)
-		log.Printf("%s => %s \n", track.src, destPath)
-		os.MkdirAll(destDir, os.FileMode(0777))
-		os.Rename(track.src, destPath)
-	}
 }
