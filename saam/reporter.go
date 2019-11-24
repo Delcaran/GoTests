@@ -56,7 +56,7 @@ func createDatabase(filePath string) {
 	CREATE TABLE IF NOT EXISTS Quote (
 		Socio INTEGER,
 		Data TEXT,
-		Mese TEXT,
+		Mese INTEGER,
 		Tipo TEXT,
 		FOREIGN KEY(Socio) REFERENCES Soci(ID)
 	);
@@ -128,12 +128,48 @@ func createDatabase(filePath string) {
 	WHERE Quote.Socio NOT IN IscrizioniPagate
 	;
 
-	CREATE VIEW IF NOT EXISTS Morosi AS SELECT
-	Soci.Cognome,
-	Soci.Nome
-	FROM Quote
-	INNER JOIN Soci ON Soci.ID=Quote.Socio
-	WHERE Quote.Socio NOT IN IscrizioniPagate
+	CREATE VIEW IF NOT EXISTS PresenzeSoci AS
+	select soci.ID, soci.Cognome, soci.Nome, count(soci.ID) as presenze, strftime('%m', presenze.Data) as Mese
+	from presenze
+	inner join soci on soci.ID=presenze.Socio
+	group by soci.ID, Mese;
+
+	CREATE VIEW IF NOT EXISTS PresenzeSparring AS
+	select soci.ID, soci.Cognome, soci.Nome, count(soci.ID) as presenze, strftime('%m', presenze.Data) as Mese
+	from presenze
+	inner join soci on soci.ID=presenze.Socio
+	where presenze.Sparring=1
+	group by soci.ID, Mese;
+
+	CREATE VIEW IF NOT EXISTS PresenzeLezioni AS
+	select soci.ID, soci.Cognome, soci.Nome, count(soci.ID) as presenze, strftime('%m', presenze.Data) as Mese
+	from presenze
+	inner join soci on soci.ID=presenze.Socio
+	where presenze.Sparring=0
+	group by soci.ID, Mese;
+
+	CREATE VIEW IF NOT EXISTS QuotePagate AS
+	select PresenzeSoci.*
+	from PresenzeSoci
+	inner join quote on PresenzeSoci.ID=quote.Socio
+	where quote.mese=PresenzeSoci.Mese or quote.mese=0
+	;
+
+	CREATE VIEW IF NOT EXISTS QuotePagateID AS
+	select PresenzeSoci.ID
+	from PresenzeSoci
+	inner join quote on PresenzeSoci.ID=quote.Socio
+	where quote.mese=PresenzeSoci.Mese or quote.mese=0
+	;
+
+	CREATE VIEW IF NOT EXISTS QuoteNonPagate AS
+	select PresenzeSoci.Cognome, PresenzeSoci.Nome, PresenzeSoci.Mese, lezioni.presenze as lezioni_frequentate, sparring.presenze as sparring_frequentati
+	from PresenzeSoci
+	left outer join PresenzeSparring as sparring on PresenzeSoci.ID=sparring.ID and sparring.Mese=PresenzeSoci.Mese
+	left outer join PresenzeLezioni as lezioni on PresenzeSoci.ID=lezioni.ID and lezioni.Mese=PresenzeSoci.Mese
+	where PresenzeSoci.ID not in QuotePagateID
+	order by PresenzeSoci.Mese, PresenzeSoci.Cognome
+
 	;
 	`
 
@@ -246,7 +282,6 @@ func readPresenze(dbPath string, ids map[string]int) {
 		}
 		switch count {
 		case 0:
-			date = record
 			for column := 1; column < len(record); column++ {
 				data := strings.Split(record[column], " ")
 				day := data[1]
@@ -335,6 +370,10 @@ func readFinanze(dbPath string, anno string, ids map[string]int) {
 			}
 		}
 	}
+	if len(buffer.String()) > 0 {
+		blocchi = append(blocchi, buffer.String())
+		buffer.Reset()
+	}
 
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
@@ -374,6 +413,7 @@ func readFinanze(dbPath string, anno string, ids map[string]int) {
 							porzione := strings.Trim(strings.TrimSpace(porzione), "\"")
 							if (numPorzione == 1 || numPorzione == 2) && len(porzione) > 1 {
 								cognome = porzione
+								_ = 1
 							} else {
 								if strings.Compare(porzione, "#iscrizione") == 0 {
 									_, err = stmt.Exec(ids[cognome], data, "NULL", "Iscrizione")
@@ -397,7 +437,30 @@ func readFinanze(dbPath string, anno string, ids map[string]int) {
 			}
 			if len(data) > 0 && len(cognome) > 0 && (len(mesi) > 0 || len(tipo) > 0) {
 				for _, mese := range mesi {
-					_, err = stmt.Exec(ids[cognome], data, mese, tipo)
+					mesenum := 0
+					switch mese {
+					case "anno":
+						mesenum = 0
+					case "ottobre":
+						mesenum = 10
+					case "novembre":
+						mesenum = 11
+					case "dicembre":
+						mesenum = 12
+					case "gennaio":
+						mesenum = 1
+					case "febbraio":
+						mesenum = 2
+					case "marzo":
+						mesenum = 3
+					case "aprile":
+						mesenum = 4
+					case "maggio":
+						mesenum = 5
+					case "giugno":
+						mesenum = 6
+					}
+					_, err = stmt.Exec(ids[cognome], data, mesenum, tipo)
 					if err != nil {
 						log.Fatal(err)
 					}
