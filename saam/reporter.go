@@ -8,22 +8,22 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/smtp"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
-	"path/filepath"
 	"time"
-	"net/smtp"
 
 	_ "github.com/mattn/go-sqlite3"
 	csvmap "github.com/recursionpharma/go-csv-map"
 )
 
-type EmailConfig struct {
+type emailConfig struct {
 	Username string
 	Password string
-	Host string
-	Port int
+	Host     string
+	Port     int
 }
 
 func createDatabase(filePath string) {
@@ -345,7 +345,7 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 	tx.Commit()
 }
 
-func readFinanze(filePath string, dbPath string, anno string, ids map[string]int) {
+func readFinanze(filePath string, dbPath string, ids map[string]int) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
@@ -398,7 +398,7 @@ func readFinanze(filePath string, dbPath string, anno string, ids map[string]int
 
 	// ora da tutti i blocchi rimuovo quelli "non utili"
 	for _, blocco := range blocchi {
-		if strings.Contains(blocco, anno) && (strings.Contains(blocco, "#iscrizione") || strings.Contains(blocco, "quota:")) && !strings.Contains(blocco, " balance ") {
+		if (strings.Contains(blocco, "#iscrizione") || strings.Contains(blocco, "quota:")) && !strings.Contains(blocco, " balance ") {
 			var cognome string
 			var mesi []string
 			var tipo string
@@ -491,11 +491,11 @@ func reportCertificati(dbPath string, now time.Time) string {
 	defer rows.Close()
 
 	currYear, currMonth, currDay := now.Date()
-	data_oggi := time.Date(currYear, currMonth, currDay, 0, 0, 0, 0, now.Location())
+	dataOggi := time.Date(currYear, currMonth, currDay, 0, 0, 0, 0, now.Location())
 
-	var output_missing string
-	var output_scaduti string
-	var output_scadenti string
+	var outputMissing string
+	var outputScaduti string
+	var outputScadenti string
 	for rows.Next() {
 		var cognome string
 		var nome string
@@ -507,30 +507,30 @@ func reportCertificati(dbPath string, now time.Time) string {
 			var month int
 			var year int
 			fmt.Sscanf(data, "%d-%d-%d", &year, &month, &day)
-			data_certificato := time.Date(year, time.Month(month), day, 0, 0, 0, 0, now.Location())
+			dataCertificato := time.Date(year, time.Month(month), day, 0, 0, 0, 0, now.Location())
 			txt := fmt.Sprintf("- %s %s: %d/%d/%d\r\n", cognome, nome, day, month, year)
-			if  data_certificato.Before(data_oggi) {
-				output_scaduti = output_scaduti + txt
+			if dataCertificato.Before(dataOggi) {
+				outputScaduti = outputScaduti + txt
 			} else {
-				output_scadenti = output_scadenti + txt
+				outputScadenti = outputScadenti + txt
 			}
 		} else {
-			output_missing = output_missing + fmt.Sprintf("- %s %s\r\n", cognome, nome)
+			outputMissing = outputMissing + fmt.Sprintf("- %s %s\r\n", cognome, nome)
 		}
 	}
 	rows.Close()
 
 	output := fmt.Sprintf("PROBLEMI CERTIFICATI AL %d/%d/%d", currDay, currMonth, currYear)
 	output = fmt.Sprintf("%s\r\n%s\r\n\r\n", output, strings.Repeat("=", len(output)))
-	if (len(output_missing) + len(output_scaduti) + len(output_scadenti)) > 0 {
-		if len(output_missing) > 0 {
-			output = output + fmt.Sprintf("## SENZA CERTIFICATO\r\n\r\n%s\r\n", output_missing)
+	if (len(outputMissing) + len(outputScaduti) + len(outputScadenti)) > 0 {
+		if len(outputMissing) > 0 {
+			output = output + fmt.Sprintf("## SENZA CERTIFICATO\r\n\r\n%s\r\n", outputMissing)
 		}
-		if len(output_scaduti) > 0 {
-			output = output + fmt.Sprintf("## SCADUTI\r\n\r\n%s\r\n", output_scaduti)
+		if len(outputScaduti) > 0 {
+			output = output + fmt.Sprintf("## SCADUTI\r\n\r\n%s\r\n", outputScaduti)
 		}
-		if len(output_scadenti) > 0 {
-			output = output + fmt.Sprintf("## IN SCADENZA\r\n\r\n%s\r\n", output_scadenti)
+		if len(outputScadenti) > 0 {
+			output = output + fmt.Sprintf("## IN SCADENZA\r\n\r\n%s\r\n", outputScadenti)
 		}
 	} else {
 		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
@@ -540,7 +540,7 @@ func reportCertificati(dbPath string, now time.Time) string {
 }
 
 func monthToName(m int) string {
-	var months = [...]string {"Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre" }
+	var months = [...]string{"Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"}
 	return months[m-1]
 }
 
@@ -556,9 +556,9 @@ func reportQuote(dbPath string, now time.Time) string {
 	}
 	defer rows.Close()
 
-	var output_soci string
-	var output_socio string
-	var current_cognome string
+	var outputSoci string
+	var outputSocio string
+	var currentCognome string
 	for rows.Next() {
 		var cognome string
 		var nome string
@@ -568,35 +568,35 @@ func reportQuote(dbPath string, now time.Time) string {
 		var lezioni sql.NullInt32
 		rows.Scan(&cognome, &nome, &email, &mese, &sparring, &lezioni)
 		var meseStr = monthToName(mese)
-		if current_cognome != cognome {
-			output_soci = output_soci + fmt.Sprintf("%s\r\n", output_socio)
-			current_cognome = cognome
-			output_socio = fmt.Sprintf("+ %s %s:\r\n\t- %s", cognome, nome, meseStr)
+		if currentCognome != cognome {
+			outputSoci = outputSoci + fmt.Sprintf("%s\r\n", outputSocio)
+			currentCognome = cognome
+			outputSocio = fmt.Sprintf("+ %s %s:\r\n\t- %s", cognome, nome, meseStr)
 		} else {
-			output_socio = output_socio + fmt.Sprintf("\r\n\t- %s", meseStr)
+			outputSocio = outputSocio + fmt.Sprintf("\r\n\t- %s", meseStr)
 		}
 		if sparring.Valid {
 			value, err := sparring.Value()
 			if err != nil {
 				log.Fatalln(err)
 			}
-			output_socio = output_socio + fmt.Sprintf("\r\n\t\tSparring: %d", value)
+			outputSocio = outputSocio + fmt.Sprintf("\r\n\t\tSparring: %d", value)
 		}
 		if lezioni.Valid {
 			value, err := lezioni.Value()
 			if err != nil {
 				log.Fatalln(err)
 			}
-			output_socio = output_socio + fmt.Sprintf("\r\n\t\tLezioni : %d", value)
+			outputSocio = outputSocio + fmt.Sprintf("\r\n\t\tLezioni : %d", value)
 		}
 	}
 	rows.Close()
-	
+
 	currYear, currMonth, currDay := now.Date()
 	output := fmt.Sprintf("QUOTE DA PAGARE AL %d/%d/%d", currDay, currMonth, currYear)
 	output = fmt.Sprintf("%s\r\n%s\r\n", output, strings.Repeat("=", len(output)))
-	if len(output_soci) > 0 {
-		output = output + output_soci
+	if len(outputSoci) > 0 {
+		output = output + outputSoci
 	} else {
 		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
 	}
@@ -616,21 +616,21 @@ func reportNonIscritti(dbPath string, now time.Time) string {
 	}
 	defer rows.Close()
 
-	var output_data string
+	var outputData string
 	for rows.Next() {
 		var cognome string
 		var nome string
 		var email string
 		rows.Scan(&cognome, &nome, &email)
-		output_data = output_data + fmt.Sprintf("- %s %s\r\n", cognome, nome)
+		outputData = outputData + fmt.Sprintf("- %s %s\r\n", cognome, nome)
 	}
 	rows.Close()
-	
+
 	currYear, currMonth, currDay := now.Date()
 	output := fmt.Sprintf("NON ISCRITTI AL %d/%d/%d", currDay, currMonth, currYear)
 	output = fmt.Sprintf("%s\r\n%s\r\n\r\n", output, strings.Repeat("=", len(output)))
-	if len(output_data) > 0 {
-		output = output + output_data + "\r\n"
+	if len(outputData) > 0 {
+		output = output + outputData + "\r\n"
 	} else {
 		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
 	}
@@ -640,9 +640,9 @@ func reportNonIscritti(dbPath string, now time.Time) string {
 
 func sendMail(receivers []string, subject string, body string, toMembers bool) {
 	sender := "saamfvg+reports@achillemarozzo.fvg.it"
-	conf := &EmailConfig{"username", "password", "smtp.gmail.com", 587}
+	conf := &emailConfig{"username", "password", "smtp.gmail.com", 587}
 	auth := smtp.PlainAuth("", conf.Username, conf.Password, conf.Host)
-	msg := []byte("From: " + sender  + "\r\n" +
+	msg := []byte("From: " + sender + "\r\n" +
 		"To: " + strings.Join(receivers, ",") + "\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"\r\n" +
@@ -659,12 +659,12 @@ func sendMail(receivers []string, subject string, body string, toMembers bool) {
 
 func main() {
 	rootPath := "."
-	if len(os.Args) > 1	{
+	if len(os.Args) > 1 {
 		rootPath = os.Args[1]
 	}
 	baseDir := filepath.Join(rootPath, "Gestione di Sala")
 	dbPath := filepath.Join(baseDir, "Database.db")
-	registro := filepath.Join(baseDir, "Finanze", "registro.bean")
+	registro := filepath.Join(baseDir, "Finanze", "AS20192020.bean")
 	presenze := filepath.Join(baseDir, "Soci", "AS 19-20", "Presenze AS1920.csv")
 	soci := filepath.Join(baseDir, "Soci", "AS 19-20", "Soci AS1920.csv")
 
@@ -674,7 +674,7 @@ func main() {
 
 	ids := readSoci(soci, dbPath)
 	readPresenze(presenze, dbPath, ids)
-	readFinanze(registro, dbPath, "2019", ids)
+	readFinanze(registro, dbPath, ids)
 
 	// Data loaded, reporting
 	adesso := time.Now()
