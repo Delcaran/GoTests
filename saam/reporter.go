@@ -13,10 +13,18 @@ import (
 	"strings"
 	"path/filepath"
 	"time"
+	"net/smtp"
 
 	_ "github.com/mattn/go-sqlite3"
 	csvmap "github.com/recursionpharma/go-csv-map"
 )
+
+type EmailConfig struct {
+	Username string
+	Password string
+	Host string
+	Port int
+}
 
 func createDatabase(filePath string) {
 	os.Remove(filePath)
@@ -470,7 +478,7 @@ func readFinanze(filePath string, dbPath string, anno string, ids map[string]int
 	tx.Commit()
 }
 
-func reportCertificati(reportsDir string, dbPath string) {
+func reportCertificati(dbPath string, now time.Time) string {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatal(err)
@@ -482,9 +490,8 @@ func reportCertificati(reportsDir string, dbPath string) {
 	}
 	defer rows.Close()
 
-	adesso := time.Now()
-	currYear, currMonth, currDay := adesso.Date()
-	data_oggi := time.Date(currYear, currMonth, currDay, 0, 0, 0, 0, adesso.Location())
+	currYear, currMonth, currDay := now.Date()
+	data_oggi := time.Date(currYear, currMonth, currDay, 0, 0, 0, 0, now.Location())
 
 	var output_missing string
 	var output_scaduti string
@@ -500,7 +507,7 @@ func reportCertificati(reportsDir string, dbPath string) {
 			var month int
 			var year int
 			fmt.Sscanf(data, "%d-%d-%d", &year, &month, &day)
-			data_certificato := time.Date(year, time.Month(month), day, 0, 0, 0, 0, adesso.Location())
+			data_certificato := time.Date(year, time.Month(month), day, 0, 0, 0, 0, now.Location())
 			txt := fmt.Sprintf("- %s %s: %d/%d/%d\r\n", cognome, nome, day, month, year)
 			if  data_certificato.Before(data_oggi) {
 				output_scaduti = output_scaduti + txt
@@ -513,27 +520,23 @@ func reportCertificati(reportsDir string, dbPath string) {
 	}
 	rows.Close()
 
-	fileOutput, err := os.Create(filepath.Join(reportsDir, fmt.Sprintf("Certificati_%d%d%d.txt", currYear, currMonth, currDay)))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer fileOutput.Close()
-	output := fmt.Sprintf("# CERTIFICATI AL %d/%d/%d\r\n\r\n", currDay, currMonth, currYear)
+	output := fmt.Sprintf("PROBLEMI CERTIFICATI AL %d/%d/%d", currDay, currMonth, currYear)
+	output = fmt.Sprintf("%s\r\n%s\r\n\r\n", output, strings.Repeat("=", len(output)))
 	if (len(output_missing) + len(output_scaduti) + len(output_scadenti)) > 0 {
 		if len(output_missing) > 0 {
-			output = output + fmt.Sprintf("## SENZA CERTIFICATO\r\n%s\r\n", output_missing)
+			output = output + fmt.Sprintf("## SENZA CERTIFICATO\r\n\r\n%s\r\n", output_missing)
 		}
 		if len(output_scaduti) > 0 {
-			output = output + fmt.Sprintf("## SCADUTI\r\n%s\r\n", output_scaduti)
+			output = output + fmt.Sprintf("## SCADUTI\r\n\r\n%s\r\n", output_scaduti)
 		}
 		if len(output_scadenti) > 0 {
-			output = output + fmt.Sprintf("## IN SCADENZA\r\n%s\r\n", output_scadenti)
+			output = output + fmt.Sprintf("## IN SCADENZA\r\n\r\n%s\r\n", output_scadenti)
 		}
 	} else {
 		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
 	}
-	fileOutput.WriteString(output)
-	fileOutput.Close()
+
+	return output
 }
 
 func monthToName(m int) string {
@@ -541,7 +544,7 @@ func monthToName(m int) string {
 	return months[m-1]
 }
 
-func reportQuote(reportsDir string, dbPath string) {
+func reportQuote(dbPath string, now time.Time) string {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatal(err)
@@ -553,8 +556,6 @@ func reportQuote(reportsDir string, dbPath string) {
 	}
 	defer rows.Close()
 
-	currYear, currMonth, currDay := time.Now().Date()
-	
 	var output_soci string
 	var output_socio string
 	var current_cognome string
@@ -591,19 +592,69 @@ func reportQuote(reportsDir string, dbPath string) {
 	}
 	rows.Close()
 	
-	fileOutput, err := os.Create(filepath.Join(reportsDir, fmt.Sprintf("Morosi_%d%d%d.txt", currYear, currMonth, currDay)))
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer fileOutput.Close()
-	output := fmt.Sprintf("# QUOTE DA PAGARE AL %d/%d/%d\r\n\r\n", currDay, currMonth, currYear)
+	currYear, currMonth, currDay := now.Date()
+	output := fmt.Sprintf("QUOTE DA PAGARE AL %d/%d/%d", currDay, currMonth, currYear)
+	output = fmt.Sprintf("%s\r\n%s\r\n", output, strings.Repeat("=", len(output)))
 	if len(output_soci) > 0 {
 		output = output + output_soci
 	} else {
 		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
 	}
-	fileOutput.WriteString(output)
-	fileOutput.Close()
+
+	return output
+}
+
+func reportNonIscritti(dbPath string, now time.Time) string {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	rows, errRow := db.Query("SELECT * FROM NonIscritti ORDER BY Cognome, Nome")
+	if errRow != nil {
+		log.Fatalln(errRow)
+	}
+	defer rows.Close()
+
+	var output_data string
+	for rows.Next() {
+		var cognome string
+		var nome string
+		var email string
+		rows.Scan(&cognome, &nome, &email)
+		output_data = output_data + fmt.Sprintf("- %s %s\r\n", cognome, nome)
+	}
+	rows.Close()
+	
+	currYear, currMonth, currDay := now.Date()
+	output := fmt.Sprintf("NON ISCRITTI AL %d/%d/%d", currDay, currMonth, currYear)
+	output = fmt.Sprintf("%s\r\n%s\r\n\r\n", output, strings.Repeat("=", len(output)))
+	if len(output_data) > 0 {
+		output = output + output_data + "\r\n"
+	} else {
+		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
+	}
+
+	return output
+}
+
+func sendMail(receivers []string, subject string, body string, toMembers bool) {
+	sender := "saamfvg+reports@achillemarozzo.fvg.it"
+	conf := &EmailConfig{"username", "password", "smtp.gmail.com", 587}
+	auth := smtp.PlainAuth("", conf.Username, conf.Password, conf.Host)
+	msg := []byte("From: " + sender  + "\r\n" +
+		"To: " + strings.Join(receivers, ",") + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"\r\n" +
+		body + "\r\n")
+	log.Println(string(msg))
+	if toMembers {
+		receivers = append(receivers, "condir@achillemarozzo.fvg.it") // BCC
+	}
+	err := smtp.SendMail(fmt.Sprintf("%s:%d", conf.Host, conf.Port), auth, sender, receivers, []byte(msg))
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 
 func main() {
@@ -611,10 +662,8 @@ func main() {
 	if len(os.Args) > 1	{
 		rootPath = os.Args[1]
 	}
-	
 	baseDir := filepath.Join(rootPath, "Gestione di Sala")
 	dbPath := filepath.Join(baseDir, "Database.db")
-	reportsDir := filepath.Join(baseDir, "Reports")
 	registro := filepath.Join(baseDir, "Finanze", "registro.bean")
 	presenze := filepath.Join(baseDir, "Soci", "AS 19-20", "Presenze AS1920.csv")
 	soci := filepath.Join(baseDir, "Soci", "AS 19-20", "Soci AS1920.csv")
@@ -628,6 +677,10 @@ func main() {
 	readFinanze(registro, dbPath, "2019", ids)
 
 	// Data loaded, reporting
-	reportCertificati(reportsDir, dbPath)
-	reportQuote(reportsDir, dbPath)
+	adesso := time.Now()
+	certificati := reportCertificati(dbPath, adesso)
+	quote := reportQuote(dbPath, adesso)
+	noniscritti := reportNonIscritti(dbPath, adesso)
+	body := fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", noniscritti, certificati, quote)
+	sendMail([]string{"condir@achillemarozzo.fvg.it"}, "Report situazione di Sala", body, false)
 }
