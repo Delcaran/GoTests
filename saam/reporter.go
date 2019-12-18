@@ -11,7 +11,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"regexp"
+	"path/filepath"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	csvmap "github.com/recursionpharma/go-csv-map"
@@ -169,9 +170,9 @@ func createDatabase(filePath string) {
 	}
 }
 
-func readSoci(dbPath string) map[string]int {
+func readSoci(filePath string, dbPath string) map[string]int {
 	// Load a csv file.
-	f, _ := os.Open("Soci AS1920.csv")
+	f, _ := os.Open(filePath)
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -238,9 +239,9 @@ func readSoci(dbPath string) map[string]int {
 	return ids
 }
 
-func readPresenze(dbPath string, ids map[string]int) {
+func readPresenze(filePath string, dbPath string, ids map[string]int) {
 	// Load a csv file.
-	f, _ := os.Open("Presenze AS1920.csv")
+	f, _ := os.Open(filePath)
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -336,8 +337,8 @@ func readPresenze(dbPath string, ids map[string]int) {
 	tx.Commit()
 }
 
-func readFinanze(dbPath string, anno string, ids map[string]int) {
-	file, err := os.Open("registro.bean")
+func readFinanze(filePath string, dbPath string, anno string, ids map[string]int) {
+	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -469,10 +470,164 @@ func readFinanze(dbPath string, anno string, ids map[string]int) {
 	tx.Commit()
 }
 
+func reportCertificati(reportsDir string, dbPath string) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	rows, errRow := db.Query("SELECT * FROM CertificatiInScadenza ORDER BY Cognome, Nome, DataScadenzaCertificatoMedico")
+	if errRow != nil {
+		log.Fatalln(errRow)
+	}
+	defer rows.Close()
+
+	adesso := time.Now()
+	currYear, currMonth, currDay := adesso.Date()
+	data_oggi := time.Date(currYear, currMonth, currDay, 0, 0, 0, 0, adesso.Location())
+
+	var output_missing string
+	var output_scaduti string
+	var output_scadenti string
+	for rows.Next() {
+		var cognome string
+		var nome string
+		var email string
+		var data string
+		rows.Scan(&cognome, &nome, &email, &data)
+		if len(data) > 0 {
+			var day int
+			var month int
+			var year int
+			fmt.Sscanf(data, "%d-%d-%d", &year, &month, &day)
+			data_certificato := time.Date(year, time.Month(month), day, 0, 0, 0, 0, adesso.Location())
+			txt := fmt.Sprintf("- %s %s: %d/%d/%d\r\n", cognome, nome, day, month, year)
+			if  data_certificato.Before(data_oggi) {
+				output_scaduti = output_scaduti + txt
+			} else {
+				output_scadenti = output_scadenti + txt
+			}
+		} else {
+			output_missing = output_missing + fmt.Sprintf("- %s %s\r\n", cognome, nome)
+		}
+	}
+	rows.Close()
+
+	fileOutput, err := os.Create(filepath.Join(reportsDir, fmt.Sprintf("Certificati_%d%d%d.txt", currYear, currMonth, currDay)))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer fileOutput.Close()
+	output := fmt.Sprintf("# CERTIFICATI AL %d/%d/%d\r\n\r\n", currDay, currMonth, currYear)
+	if (len(output_missing) + len(output_scaduti) + len(output_scadenti)) > 0 {
+		if len(output_missing) > 0 {
+			output = output + fmt.Sprintf("## SENZA CERTIFICATO\r\n%s\r\n", output_missing)
+		}
+		if len(output_scaduti) > 0 {
+			output = output + fmt.Sprintf("## SCADUTI\r\n%s\r\n", output_scaduti)
+		}
+		if len(output_scadenti) > 0 {
+			output = output + fmt.Sprintf("## IN SCADENZA\r\n%s\r\n", output_scadenti)
+		}
+	} else {
+		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
+	}
+	fileOutput.WriteString(output)
+	fileOutput.Close()
+}
+
+func monthToName(m int) string {
+	var months = [...]string {"Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre" }
+	return months[m-1]
+}
+
+func reportQuote(reportsDir string, dbPath string) {
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	rows, errRow := db.Query("SELECT * FROM QuoteDovute ORDER BY Cognome, Nome, Mese")
+	if errRow != nil {
+		log.Fatalln(errRow)
+	}
+	defer rows.Close()
+
+	currYear, currMonth, currDay := time.Now().Date()
+	
+	var output_soci string
+	var output_socio string
+	var current_cognome string
+	for rows.Next() {
+		var cognome string
+		var nome string
+		var mese int
+		var email string
+		var sparring sql.NullInt32
+		var lezioni sql.NullInt32
+		rows.Scan(&cognome, &nome, &email, &mese, &sparring, &lezioni)
+		var meseStr = monthToName(mese)
+		if current_cognome != cognome {
+			output_soci = output_soci + fmt.Sprintf("%s\r\n", output_socio)
+			current_cognome = cognome
+			output_socio = fmt.Sprintf("+ %s %s:\r\n\t- %s", cognome, nome, meseStr)
+		} else {
+			output_socio = output_socio + fmt.Sprintf("\r\n\t- %s", meseStr)
+		}
+		if sparring.Valid {
+			value, err := sparring.Value()
+			if err != nil {
+				log.Fatalln(err)
+			}
+			output_socio = output_socio + fmt.Sprintf("\r\n\t\tSparring: %d", value)
+		}
+		if lezioni.Valid {
+			value, err := lezioni.Value()
+			if err != nil {
+				log.Fatalln(err)
+			}
+			output_socio = output_socio + fmt.Sprintf("\r\n\t\tLezioni : %d", value)
+		}
+	}
+	rows.Close()
+	
+	fileOutput, err := os.Create(filepath.Join(reportsDir, fmt.Sprintf("Morosi_%d%d%d.txt", currYear, currMonth, currDay)))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer fileOutput.Close()
+	output := fmt.Sprintf("# QUOTE DA PAGARE AL %d/%d/%d\r\n\r\n", currDay, currMonth, currYear)
+	if len(output_soci) > 0 {
+		output = output + output_soci
+	} else {
+		output = output + fmt.Sprintln("Tutti in regola, nulla da segnalare.")
+	}
+	fileOutput.WriteString(output)
+	fileOutput.Close()
+}
+
 func main() {
-	dbPath := "Database.db"
+	rootPath := "."
+	if len(os.Args) > 1	{
+		rootPath = os.Args[1]
+	}
+	
+	baseDir := filepath.Join(rootPath, "Gestione di Sala")
+	dbPath := filepath.Join(baseDir, "Database.db")
+	reportsDir := filepath.Join(baseDir, "Reports")
+	registro := filepath.Join(baseDir, "Finanze", "registro.bean")
+	presenze := filepath.Join(baseDir, "Soci", "AS 19-20", "Presenze AS1920.csv")
+	soci := filepath.Join(baseDir, "Soci", "AS 19-20", "Soci AS1920.csv")
+
+	// Data loading
+
 	createDatabase(dbPath)
-	ids := readSoci(dbPath)
-	readPresenze(dbPath, ids)
-	readFinanze(dbPath, "2019", ids)
+
+	ids := readSoci(soci, dbPath)
+	readPresenze(presenze, dbPath, ids)
+	readFinanze(registro, dbPath, "2019", ids)
+
+	// Data loaded, reporting
+	reportCertificati(reportsDir, dbPath)
+	reportQuote(reportsDir, dbPath)
 }
