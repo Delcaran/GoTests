@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"regexp"
 
@@ -64,7 +65,8 @@ func createDatabase(filePath string) {
 
 	CREATE VIEW IF NOT EXISTS NonIscritti AS SELECT
 	Cognome,
-	Nome
+	Nome,
+	Email
 	FROM Soci
 	INNER JOIN Documenti ON Soci.ID=Documenti.Socio AND Documenti.DataIscrizione='';
 
@@ -87,6 +89,7 @@ func createDatabase(filePath string) {
 	CREATE VIEW IF NOT EXISTS NonCertificati AS SELECT
 	Cognome,
 	Nome,
+	Email,
 	DataScadenzaCertificatoMedico
 	FROM Soci
 	INNER JOIN Documenti ON Soci.ID=Documenti.Socio AND Documenti.DataScadenzaCertificatoMedico<=date('now')
@@ -95,6 +98,7 @@ func createDatabase(filePath string) {
 	CREATE VIEW IF NOT EXISTS CertificatiInScadenza AS SELECT
 	Cognome,
 	Nome,
+	Email,
 	DataScadenzaCertificatoMedico
 	FROM Soci
 	INNER JOIN Documenti ON Soci.ID=Documenti.Socio AND Documenti.DataScadenzaCertificatoMedico<=date('now', '+1 months')
@@ -116,7 +120,8 @@ func createDatabase(filePath string) {
 
 	CREATE VIEW IF NOT EXISTS NonIscritti AS SELECT
 	Soci.Cognome,
-	Soci.Nome
+	Soci.Nome,
+	Soci.Email
 	FROM Quote
 	INNER JOIN Soci ON Soci.ID=Quote.Socio
 	WHERE Quote.Socio NOT IN IscrizioniPagate;
@@ -148,7 +153,7 @@ func createDatabase(filePath string) {
 	order by PresenzeSoci.ID;
 
 	CREATE VIEW IF NOT EXISTS QuoteDovute AS
-	Select Soci.Cognome, Soci.Nome, QuotePagateMese.Mese, PresenzeSparring.Presenze as sparring, PresenzeLezioni.Presenze as lezioni
+	Select Soci.Cognome, Soci.Nome, Soci.Email, QuotePagateMese.Mese, PresenzeSparring.Presenze as sparring, PresenzeLezioni.Presenze as lezioni
 	from QuotePagateMese
 	left outer join PresenzeSparring on QuotePagateMese.ID=PresenzeSparring.ID and QuotePagateMese.Mese=PresenzeSparring.Mese
 	left outer join PresenzeLezioni on QuotePagateMese.ID=PresenzeLezioni.ID and QuotePagateMese.Mese=PresenzeLezioni.Mese
