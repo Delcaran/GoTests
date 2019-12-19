@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/smtp"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +16,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	csvmap "github.com/recursionpharma/go-csv-map"
+	"github.com/wcharczuk/go-chart" //exposes "chart"
+	"gopkg.in/gomail.v2"
 )
 
 type emailConfig struct {
@@ -24,6 +25,20 @@ type emailConfig struct {
 	Password string
 	Host     string
 	Port     int
+}
+
+type emailUser struct {
+	Name    string
+	Address string
+}
+
+type emailData struct {
+	From        emailUser
+	To          []emailUser
+	Subject     string
+	Body        string
+	Attachments []string
+	ToMembers   bool
 }
 
 func createDatabase(filePath string) {
@@ -486,7 +501,7 @@ func reportCertificati(dbPath string, now time.Time) string {
 	defer db.Close()
 	rows, errRow := db.Query("SELECT * FROM CertificatiInScadenza ORDER BY Cognome, Nome, DataScadenzaCertificatoMedico")
 	if errRow != nil {
-		log.Fatalln(errRow)
+		panic(errRow)
 	}
 	defer rows.Close()
 
@@ -552,7 +567,7 @@ func reportQuote(dbPath string, now time.Time) string {
 	defer db.Close()
 	rows, errRow := db.Query("SELECT * FROM QuoteDovute ORDER BY Cognome, Nome, Mese")
 	if errRow != nil {
-		log.Fatalln(errRow)
+		panic(errRow)
 	}
 	defer rows.Close()
 
@@ -578,14 +593,14 @@ func reportQuote(dbPath string, now time.Time) string {
 		if sparring.Valid {
 			value, err := sparring.Value()
 			if err != nil {
-				log.Fatalln(err)
+				panic(err)
 			}
 			outputSocio = outputSocio + fmt.Sprintf("\r\n\t\tSparring: %d", value)
 		}
 		if lezioni.Valid {
 			value, err := lezioni.Value()
 			if err != nil {
-				log.Fatalln(err)
+				panic(err)
 			}
 			outputSocio = outputSocio + fmt.Sprintf("\r\n\t\tLezioni : %d", value)
 		}
@@ -612,7 +627,7 @@ func reportNonIscritti(dbPath string, now time.Time) string {
 	defer db.Close()
 	rows, errRow := db.Query("SELECT * FROM NonIscritti ORDER BY Cognome, Nome")
 	if errRow != nil {
-		log.Fatalln(errRow)
+		panic(errRow)
 	}
 	defer rows.Close()
 
@@ -638,22 +653,46 @@ func reportNonIscritti(dbPath string, now time.Time) string {
 	return output
 }
 
-func sendMail(receivers []string, subject string, body string, toMembers bool) {
-	sender := "saamfvg+reports@achillemarozzo.fvg.it"
-	conf := &emailConfig{"username", "password", "smtp.gmail.com", 587}
-	auth := smtp.PlainAuth("", conf.Username, conf.Password, conf.Host)
-	msg := []byte("From: " + sender + "\r\n" +
-		"To: " + strings.Join(receivers, ",") + "\r\n" +
-		"Subject: " + subject + "\r\n" +
-		"\r\n" +
-		body + "\r\n")
-	log.Println(string(msg))
-	if toMembers {
-		receivers = append(receivers, "condir@achillemarozzo.fvg.it") // BCC
+func createMailMessage(data emailData) *gomail.Message {
+	m := gomail.NewMessage()
+	m.SetHeader("From", data.From.Address, data.From.Name)
+	recepients := make([]string, len(data.To))
+	for i, recepient := range data.To {
+		recepients[i] = m.FormatAddress(recepient.Address, recepient.Name)
 	}
-	err := smtp.SendMail(fmt.Sprintf("%s:%d", conf.Host, conf.Port), auth, sender, receivers, []byte(msg))
+	m.SetHeader("To", recepients...)
+	m.SetHeader("Subject", data.Subject)
+	m.SetBody("text/plain", data.Body)
+
+	for _, attachment := range data.Attachments {
+		m.Attach(attachment)
+	}
+
+	if data.ToMembers {
+		m.SetAddressHeader("Cc", "condir@achillemarozzo.fvg.it", "ConDir")
+	}
+
+	return m
+}
+
+func sendMail(conf emailConfig, data emailData) {
+	d := gomail.NewDialer(conf.Host, conf.Port, conf.Username, conf.Password)
+	if err := d.DialAndSend(createMailMessage(data)); err != nil {
+		log.Printf("Could not send email to %q: %v", data.To, err)
+	}
+}
+
+func sendMultipleMail(conf emailConfig, datas []emailData) {
+	d := gomail.NewDialer(conf.Host, conf.Port, conf.Username, conf.Password)
+	s, err := d.Dial()
 	if err != nil {
-		log.Fatalln(err)
+		panic(err)
+	}
+
+	for _, data := range datas {
+		if err := gomail.Send(s, createMailMessage(data)); err != nil {
+			log.Printf("Could not send email to %q: %v", data.To, err)
+		}
 	}
 }
 
@@ -664,23 +703,63 @@ func main() {
 	}
 	baseDir := filepath.Join(rootPath, "Gestione di Sala")
 	dbPath := filepath.Join(baseDir, "Database.db")
-	registro := filepath.Join(baseDir, "Finanze", "AS20192020.bean")
-	presenze := filepath.Join(baseDir, "Soci", "AS 19-20", "Presenze AS1920.csv")
-	soci := filepath.Join(baseDir, "Soci", "AS 19-20", "Soci AS1920.csv")
 
 	// Data loading
 
 	createDatabase(dbPath)
-
-	ids := readSoci(soci, dbPath)
-	readPresenze(presenze, dbPath, ids)
-	readFinanze(registro, dbPath, ids)
+	ids := readSoci(filepath.Join(baseDir, "Soci", "AS 19-20", "Soci AS1920.csv"), dbPath)
+	readPresenze(filepath.Join(baseDir, "Soci", "AS 19-20", "Presenze AS1920.csv"), dbPath, ids)
+	readFinanze(filepath.Join(baseDir, "Finanze", "AS20192020.bean"), dbPath, ids)
 
 	// Data loaded, reporting
-	adesso := time.Now()
-	certificati := reportCertificati(dbPath, adesso)
-	quote := reportQuote(dbPath, adesso)
-	noniscritti := reportNonIscritti(dbPath, adesso)
-	body := fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", noniscritti, certificati, quote)
-	sendMail([]string{"condir@achillemarozzo.fvg.it"}, "Report situazione di Sala", body, false)
+	/*
+		smtpConfig := emailConfig{
+			Username: "username",
+			Password: "password",
+			Host:     "smtp.gmail.com",
+			Port:     587,
+		}
+		adesso := time.Now()
+
+		// Mail per condir: iscrizioni, pagamenti e certificati medici
+		reportMail := emailData{
+			Subject: "Report situazione di Sala",
+			From: emailUser{
+				Address: "saamfvg+reports@achillemarozzo.fvg.it",
+				Name:    "SAAMFVG AutoReports",
+			},
+			To: []emailUser{
+				emailUser{
+					Address: "condir@achillemarozzo.fvg.it",
+					Name:    "ConDir",
+				},
+			},
+			Body:      fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", reportNonIscritti(dbPath, adesso), reportCertificati(dbPath, adesso), reportQuote(dbPath, adesso)),
+			ToMembers: false,
+		}
+		sendMail(smtpConfig, reportMail)
+	*/
+
+	// Per ComTec: grafico presenze
+	graph := chart.Chart{
+		Series: []chart.Series{
+			chart.ContinuousSeries{
+				XValues: []float64{1.0, 2.0, 3.0, 4.0},
+				YValues: []float64{1.0, 2.0, 3.0, 4.0},
+			},
+		},
+	}
+
+	buffer := bytes.NewBuffer([]byte{})
+	err := graph.Render(chart.PNG, buffer)
+	if err != nil {
+		panic(err)
+	}
+	graphOut, err := os.Create("char.png")
+	if err != nil {
+		panic(err)
+	}
+	defer graphOut.Close()
+	buffer.WriteTo(graphOut)
+	graphOut.Close()
 }
