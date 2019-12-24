@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -284,6 +285,9 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 	// Create a new reader.
 	r := csv.NewReader(bufio.NewReader(f))
 	count := 0
+	startColumn := 2
+	var stopColumn int
+	today := time.Now()
 	date := make([]string, 1)
 	sala := make([]string, 1)
 	sparring := make([]string, 1)
@@ -295,57 +299,65 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 		}
 		switch count {
 		case 0:
-			for column := 2; column < len(record); column++ {
+			for column := startColumn; column < len(record); column++ {
 				data := strings.Split(record[column], " ")
-				day := data[1]
+				day, _ := strconv.Atoi(data[1])
 				if data[0] == "lun" {
 					sparring = append(sparring, "1")
 				} else {
 					sparring = append(sparring, "0")
 				}
-				year := "2019"
-				month := "10"
+				var year int
+				var month int
 				switch data[2] {
 				case "ott":
-					year = "2019"
-					month = "10"
+					year = 2019
+					month = 10
 				case "nov":
-					year = "2019"
-					month = "11"
+					year = 2019
+					month = 11
 				case "dic":
-					year = "2019"
-					month = "12"
+					year = 2019
+					month = 12
 				case "gen":
-					year = "2020"
-					month = "01"
+					year = 2020
+					month = 01
 				case "feb":
-					year = "2020"
-					month = "02"
+					year = 2020
+					month = 02
 				case "mar":
-					year = "2020"
-					month = "03"
+					year = 2020
+					month = 03
 				case "apr":
-					year = "2020"
-					month = "04"
+					year = 2020
+					month = 04
 				case "mag":
-					year = "2020"
-					month = "05"
+					year = 2020
+					month = 05
 				case "giu":
-					year = "2020"
-					month = "06"
+					year = 2020
+					month = 06
 				}
-				date = append(date, fmt.Sprintf("%s-%s-%s", year, month, day))
+				columnDate := time.Date(year, time.Month(month), day,
+					today.Hour(), today.Minute(), today.Second(), today.Nanosecond(), today.Location())
+				if columnDate.After(today) {
+					stopColumn = column + 1
+					break
+				} else {
+					date = append(date, fmt.Sprintf("%d-%d-%d", year, month, day))
+				}
 			}
 		case 1:
-			for column := 2; column < len(record); column++ {
+			for column := startColumn; column < stopColumn; column++ {
 				sala = append(sala, record[column])
 			}
 		default:
-			for column := 2; column < len(record); column++ {
+			for column := startColumn; column < stopColumn; column++ {
 				if len(record[column]) > 0 {
 					cognome := record[0]
 					if id, ok := ids[cognome]; ok {
-						_, err = stmt.Exec(id, sala[column], date[column], sparring[column])
+						columnIndex := column - startColumn
+						_, err = stmt.Exec(id, sala[columnIndex], date[columnIndex], sparring[columnIndex])
 						if err != nil {
 							log.Fatal(err)
 						}
