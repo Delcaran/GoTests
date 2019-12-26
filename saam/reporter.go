@@ -183,7 +183,7 @@ func createDatabase(filePath string) {
 	left outer join PresenzeSparring on QuotePagateMese.ID=PresenzeSparring.ID and QuotePagateMese.Mese=PresenzeSparring.Mese
 	left outer join PresenzeLezioni on QuotePagateMese.ID=PresenzeLezioni.ID and QuotePagateMese.Mese=PresenzeLezioni.Mese
 	inner join Soci on Soci.ID=QuotePagateMese.ID
-	where QuotePagateMese.Pagato='NO'
+	where QuotePagateMese.Pagato='NO' and QuotePagateMese.Mese NOTNULL
 	order by Soci.Cognome, Soci.Nome, QuotePagateMese.Mese;
 	`
 
@@ -288,9 +288,9 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 	startColumn := 2
 	var stopColumn int
 	today := time.Now()
-	date := make([]string, 1)
-	sala := make([]string, 1)
-	sparring := make([]string, 1)
+	date := make([]string, 0)
+	sala := make([]string, 0)
+	sparring := make([]string, 0)
 	for {
 		record, err := r.Read()
 		// Stop at EOF.
@@ -301,50 +301,52 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 		case 0:
 			for column := startColumn; column < len(record); column++ {
 				data := strings.Split(record[column], " ")
-				day, _ := strconv.Atoi(data[1])
-				if data[0] == "lun" {
-					sparring = append(sparring, "1")
-				} else {
-					sparring = append(sparring, "0")
-				}
-				var year int
-				var month int
-				switch data[2] {
-				case "ott":
-					year = 2019
-					month = 10
-				case "nov":
-					year = 2019
-					month = 11
-				case "dic":
-					year = 2019
-					month = 12
-				case "gen":
-					year = 2020
-					month = 01
-				case "feb":
-					year = 2020
-					month = 02
-				case "mar":
-					year = 2020
-					month = 03
-				case "apr":
-					year = 2020
-					month = 04
-				case "mag":
-					year = 2020
-					month = 05
-				case "giu":
-					year = 2020
-					month = 06
-				}
-				columnDate := time.Date(year, time.Month(month), day,
-					today.Hour(), today.Minute(), today.Second(), today.Nanosecond(), today.Location())
-				if columnDate.After(today) {
-					stopColumn = column + 1
-					break
-				} else {
-					date = append(date, fmt.Sprintf("%d-%d-%d", year, month, day))
+				if len(data) == 3 {				
+					day, _ := strconv.Atoi(data[1])
+					if data[0] == "lun" {
+						sparring = append(sparring, "1")
+					} else {
+						sparring = append(sparring, "0")
+					}
+					var year int
+					var month int
+					switch data[2] {
+					case "ott":
+						year = 2019
+						month = 10
+					case "nov":
+						year = 2019
+						month = 11
+					case "dic":
+						year = 2019
+						month = 12
+					case "gen":
+						year = 2020
+						month = 01
+					case "feb":
+						year = 2020
+						month = 02
+					case "mar":
+						year = 2020
+						month = 03
+					case "apr":
+						year = 2020
+						month = 04
+					case "mag":
+						year = 2020
+						month = 05
+					case "giu":
+						year = 2020
+						month = 06
+					}
+					columnDate := time.Date(year, time.Month(month), day,
+						today.Hour(), today.Minute(), today.Second(), today.Nanosecond(), today.Location())
+					if columnDate.After(today) {
+						stopColumn = column + 1
+						break
+					} else {
+						date = append(date, fmt.Sprintf("%d-%d-%d", year, month, day))
+					}
 				}
 			}
 		case 1:
@@ -353,7 +355,7 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 			}
 		default:
 			for column := startColumn; column < stopColumn; column++ {
-				if len(record[column]) > 0 {
+				if record[column] == "x" {
 					cognome := record[0]
 					if id, ok := ids[cognome]; ok {
 						columnIndex := column - startColumn
@@ -567,8 +569,26 @@ func reportCertificati(dbPath string, now time.Time) string {
 }
 
 func monthToName(m int) string {
-	var months = [...]string{"Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"}
-	return months[m-1]
+	months := map[int]string{
+		1:"Gennaio", 
+		2:"Febbraio", 
+		3:"Marzo", 
+		4:"Aprile", 
+		5:"Maggio", 
+		6:"Giugno", 
+		7:"Luglio", 
+		8:"Agosto", 
+		9:"Settembre", 
+		10:"Ottobre", 
+		11:"Novembre", 
+		12:"Dicembre",
+	}
+	month, ok := months[m]
+	if !ok {
+		fmt.Printf("%v is not a month\n", m)
+		log.Fatal("Mese non trovato")
+	} 
+	return month
 }
 
 func reportQuote(dbPath string, now time.Time) string {
@@ -594,6 +614,9 @@ func reportQuote(dbPath string, now time.Time) string {
 		var sparring sql.NullInt32
 		var lezioni sql.NullInt32
 		rows.Scan(&cognome, &nome, &email, &mese, &sparring, &lezioni)
+		if mese == 0 {
+			fmt.Printf("%v\n", rows)
+		}
 		var meseStr = monthToName(mese)
 		if currentCognome != cognome {
 			outputSoci = outputSoci + fmt.Sprintf("%s\r\n", outputSocio)
@@ -724,33 +747,33 @@ func main() {
 	readFinanze(filepath.Join(baseDir, "Finanze", "AS20192020.bean"), dbPath, ids)
 
 	// Data loaded, reporting
-	/*
-		smtpConfig := emailConfig{
-			Username: "username",
-			Password: "password",
-			Host:     "smtp.gmail.com",
-			Port:     587,
-		}
-		adesso := time.Now()
+	smtpConfig := emailConfig{
+		Username: "matteo.paoluzzi@achillemarozzo.fvg.it",
+		Password: "kmnnfwikpsaqqihk",
+		Host:     "smtp.gmail.com",
+		Port:     587,
+	}
+	adesso := time.Now()
 
-		// Mail per condir: iscrizioni, pagamenti e certificati medici
-		reportMail := emailData{
-			Subject: "Report situazione di Sala",
-			From: emailUser{
-				Address: "saamfvg+reports@achillemarozzo.fvg.it",
-				Name:    "SAAMFVG AutoReports",
+	// Mail per condir: iscrizioni, pagamenti e certificati medici
+	reportMail := emailData{
+		Subject: "Report situazione di Sala",
+		From: emailUser{
+			Address: "matteo.paoluzzi@achillemarozzo.fvg.it",
+			Name:    "SAAMFVG AutoReports",
+		},
+		To: []emailUser{
+			emailUser{
+				Address: "matteo.paoluzzi@achillemarozzo.fvg.it",
+				Name:    "ConDir",
 			},
-			To: []emailUser{
-				emailUser{
-					Address: "condir@achillemarozzo.fvg.it",
-					Name:    "ConDir",
-				},
-			},
-			Body:      fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", reportNonIscritti(dbPath, adesso), reportCertificati(dbPath, adesso), reportQuote(dbPath, adesso)),
-			ToMembers: false,
-		}
-		sendMail(smtpConfig, reportMail)
-	*/
+		},
+		Body:      fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", reportNonIscritti(dbPath, adesso), reportCertificati(dbPath, adesso), reportQuote(dbPath, adesso)),
+		ToMembers: false,
+	}
+	//sendMail(smtpConfig, reportMail)
+	fmt.Printf("%v\n", smtpConfig)
+	fmt.Printf("%v\n", reportMail)
 
 	// Per ComTec: grafico presenze
 	graph := chart.Chart{
