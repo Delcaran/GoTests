@@ -301,7 +301,7 @@ func readPresenze(filePath string, dbPath string, ids map[string]int) {
 		case 0:
 			for column := startColumn; column < len(record); column++ {
 				data := strings.Split(record[column], " ")
-				if len(data) == 3 {				
+				if len(data) == 3 {
 					day, _ := strconv.Atoi(data[1])
 					if data[0] == "lun" {
 						sparring = append(sparring, "1")
@@ -570,24 +570,24 @@ func reportCertificati(dbPath string, now time.Time) string {
 
 func monthToName(m int) string {
 	months := map[int]string{
-		1:"Gennaio", 
-		2:"Febbraio", 
-		3:"Marzo", 
-		4:"Aprile", 
-		5:"Maggio", 
-		6:"Giugno", 
-		7:"Luglio", 
-		8:"Agosto", 
-		9:"Settembre", 
-		10:"Ottobre", 
-		11:"Novembre", 
-		12:"Dicembre",
+		1:  "Gennaio",
+		2:  "Febbraio",
+		3:  "Marzo",
+		4:  "Aprile",
+		5:  "Maggio",
+		6:  "Giugno",
+		7:  "Luglio",
+		8:  "Agosto",
+		9:  "Settembre",
+		10: "Ottobre",
+		11: "Novembre",
+		12: "Dicembre",
 	}
 	month, ok := months[m]
 	if !ok {
 		fmt.Printf("%v is not a month\n", m)
 		log.Fatal("Mese non trovato")
-	} 
+	}
 	return month
 }
 
@@ -764,14 +764,14 @@ func main() {
 		},
 		To: []emailUser{
 			emailUser{
-				Address: "matteo.paoluzzi@achillemarozzo.fvg.it",
+				Address: "condir@achillemarozzo.fvg.it",
 				Name:    "ConDir",
 			},
 		},
 		Body:      fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", reportNonIscritti(dbPath, adesso), reportCertificati(dbPath, adesso), reportQuote(dbPath, adesso)),
 		ToMembers: false,
 	}
-	//sendMail(smtpConfig, reportMail)
+	sendMail(smtpConfig, reportMail)
 	fmt.Printf("%v\n", smtpConfig)
 	fmt.Printf("%v\n", reportMail)
 
