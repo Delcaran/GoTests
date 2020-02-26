@@ -771,7 +771,7 @@ func main() {
 		Body:      fmt.Sprintf("\r\n%s\r\n%s\r\n%s\r\n", reportNonIscritti(dbPath, adesso), reportCertificati(dbPath, adesso), reportQuote(dbPath, adesso)),
 		ToMembers: false,
 	}
-	sendMail(smtpConfig, reportMail)
+	//sendMail(smtpConfig, reportMail)
 	fmt.Printf("%v\n", smtpConfig)
 	fmt.Printf("%v\n", reportMail)
 
