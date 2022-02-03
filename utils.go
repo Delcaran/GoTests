@@ -11,7 +11,7 @@ import (
 )
 
 func pidof(proc_name string) (int, error) {
-	const proc_dir = "/proc"
+	const proc_dir string = "/proc"
 	if os.Chdir(proc_dir) != nil {
 		return -1, errors.New("/proc unavailable.")
 	}
