@@ -3,9 +3,11 @@ package main
 import (
 	"errors"
 	"io/ioutil"
+	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func pidof(proc_name string) (int, error) {
@@ -68,4 +70,17 @@ func pidof(proc_name string) (int, error) {
 		}
 	}
 	return -1, errors.New("pid not found")
+}
+
+func checkOpenPort(host string, port string) (bool, error) {
+	timeout := time.Second
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return false, err
+	}
+	if conn != nil {
+		defer conn.Close()
+		return true, nil
+	}
+	return false, errors.New("Unknow error")
 }
